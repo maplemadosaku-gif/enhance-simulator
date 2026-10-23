@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>強化コストシミュレーター</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: one input band on top, a best-pick summary, then one detail table per upgrade stage. */
+:root {
+  --bg: #f2f5f6;
+  --surface: #ffffff;
+  --fg: #14212b;
+  --muted: #5a6a75;
+  --line: #d8e0e4;
+  --accent: #0b6e6e;
+  --good: #1b7a4b;
+  --good-bg: #e2f4ea;
+  --field: #f7fafb;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  color-scheme: light;
+  --font-num: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e171c;
+    --surface: #152229;
+    --fg: #e5eef2;
+    --muted: #8da0ab;
+    --line: #27373f;
+    --accent: #4fc3c3;
+    --good: #5fd49a;
+    --good-bg: #153326;
+    --field: #0f1a20;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e171c;
+  --surface: #152229;
+  --fg: #e5eef2;
+  --muted: #8da0ab;
+  --line: #27373f;
+  --accent: #4fc3c3;
+  --good: #5fd49a;
+  --good-bg: #153326;
+  --field: #0f1a20;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 6px; text-wrap: balance; }
+h2 { font-size: 1.05rem; margin: 0; }
+p { margin: 0; }
+.lead { color: var(--muted); max-width: 65ch; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label { font-weight: 700; font-size: 0.9rem; }
+.field .row { display: flex; align-items: center; gap: 6px; }
+.field input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-family: var(--font-num);
+  font-size: 1rem;
+  color: var(--fg);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.field .unit { color: var(--muted); font-size: 0.85rem; }
+.hint { color: var(--muted); font-size: 0.85rem; }
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 640px; }
+th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 0.75rem; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; }
+th:first-child, td:first-child { text-align: left; }
+tr:last-child td { border-bottom: 0; }
+tr.best td { background: var(--good-bg); }
+tr.best td:first-child { box-shadow: inset 3px 0 0 var(--good); }
+tr.skip td { color: var(--muted); }
+.tag {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--good);
+  border: 1px solid var(--good);
+  border-radius: 3px;
+  padding: 0 6px;
+  margin-left: 8px;
+  line-height: 1.6;
+}
+.save { color: var(--good); }
+.stage-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 16px; }
+.stage-head .base { color: var(--muted); font-size: 0.85rem; }
+.formula {
+  font-family: var(--font-num);
+  font-size: 0.85rem;
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.total td { font-weight: 700; }
+@media (prefers-reduced-motion: no-preference) {
+  tr.best td { transition: background 0.2s; }
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>強化コストシミュレーター</h1>
+    <p class="lead">ラッキーデー書の相場を入力すると、強化ごとに成功までの期待コストを比べて、いちばん安く済む選択肢を示します。強化の基本成功率は6%です。</p>
+  </header>
+
+  <section class="panel" aria-labelledby="price-h">
+    <h2 id="price-h">ラッキーデー書の相場（1枚あたり）</h2>
+    <div class="inputs" id="inputs"></div>
+    <p class="hint">ラッキーデー書は試行のたびに1枚使うため、1回あたりの費用は「強化コスト＋書の相場」です。未入力の書は比較に含めません。単位はすべてmです。</p>
+  </section>
+
+  <section class="panel" aria-labelledby="sum-h">
+    <h2 id="sum-h">強化ごとの最安の選択肢</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>強化</th><th>最安の選択肢</th><th>期待総コスト</th><th>使わない場合との差</th></tr>
+        </thead>
+        <tbody id="summary"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="calc-h">
+    <h2 id="calc-h">計算方法</h2>
+    <p class="formula">期待試行回数 ＝ 1 ÷ 成功率</p>
+    <p class="formula">期待総コスト ＝ （強化コスト ＋ 書の相場）× 期待試行回数</p>
+  </section>
+
+  <div id="stages" class="wrap" style="gap:20px"></div>
+</div>
+
+<script>
+(function () {
+  var BASE_RATE = 0.06;
+  var STAGES = [
+    { name: "★36→37", cost: 150 },
+    { name: "★37→38", cost: 300 },
+    { name: "★38→39", cost: 600 },
+    { name: "★39→40", cost: 1200 },
+    { name: "★40→41", cost: 2400 }
+  ];
+  var BOOKS = [
+    { key: "p5", label: "+5%", bonus: 0.05 },
+    { key: "p7", label: "+7%", bonus: 0.07 },
+    { key: "p10", label: "+10%", bonus: 0.10 },
+    { key: "p15", label: "+15%", bonus: 0.15 },
+    { key: "p20", label: "+20%", bonus: 0.20 }
+  ];
+
+  function fmt(n) {
+    return n.toLocaleString("ja-JP", { maximumFractionDigits: 1 });
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // Expected total cost: every attempt pays the enhancement cost plus one book.
+  function expectedTotal(baseCost, bookPrice, rate) {
+    return (baseCost + bookPrice) / rate;
+  }
+
+  function buildRows(stage, prices) {
+    var rows = [];
+    var noneRate = BASE_RATE;
+    rows.push({
+      label: "使わない", rate: noneRate, attempts: 1 / noneRate,
+      perTry: stage.cost, total: expectedTotal(stage.cost, 0, noneRate), entered: true, isNone: true
+    });
+    BOOKS.forEach(function (b) {
+      var raw = prices[b.key];
+      var entered = raw !== "" && !isNaN(parseFloat(raw)) && parseFloat(raw) >= 0;
+      var rate = BASE_RATE + b.bonus;
+      var price = entered ? parseFloat(raw) : 0;
+      rows.push({
+        label: b.label, rate: rate, attempts: 1 / rate,
+        perTry: stage.cost + price,
+        total: entered ? expectedTotal(stage.cost, price, rate) : null,
+        entered: entered, isNone: false
+      });
+    });
+    var best = null;
+    rows.forEach(function (r) {
+      if (r.entered && (best === null || r.total < best.total)) best = r;
+    });
+    return { rows: rows, best: best, none: rows[0] };
+  }
+
+  // Inputs
+  var inputsBox = document.getElementById("inputs");
+  BOOKS.forEach(function (b) {
+    var f = el("div", "field");
+    var l = el("label", null, b.label);
+    l.setAttribute("for", "price-" + b.key);
+    var row = el("div", "row");
+    var inp = document.createElement("input");
+    inp.type = "number";
+    inp.id = "price-" + b.key;
+    inp.min = "0";
+    inp.step = "any";
+    inp.inputMode = "decimal";
+    inp.placeholder = "未入力";
+    inp.addEventListener("input", render);
+    row.appendChild(inp);
+    row.appendChild(el("span", "unit", "m"));
+    f.appendChild(l);
+    f.appendChild(row);
+    inputsBox.appendChild(f);
+  });
+
+  function readPrices() {
+    var p = {};
+    BOOKS.forEach(function (b) {
+      p[b.key] = document.getElementById("price-" + b.key).value;
+    });
+    return p;
+  }
+
+  function render() {
+    var prices = readPrices();
+    var summary = document.getElementById("summary");
+    var stagesBox = document.getElementById("stages");
+    summary.innerHTML = "";
+    stagesBox.innerHTML = "";
+
+    var sumBest = 0;
+    var sumNone = 0;
+
+    STAGES.forEach(function (stage) {
+      var res = buildRows(stage, prices);
+      sumBest += res.best.total;
+      sumNone += res.none.total;
+
+      // Summary row
+      var tr = document.createElement("tr");
+      tr.appendChild(el("td", null, stage.name));
+      var tdBest = el("td", null, res.best.label);
+      tr.appendChild(tdBest);
+      tr.appendChild(el("td", "num", fmt(res.best.total) + "m"));
+      var diff = res.none.total - res.best.total;
+      var tdDiff = el("td", "num" + (diff > 0.0001 ? " save" : ""),
+        diff > 0.0001 ? "−" + fmt(diff) + "m" : "差なし");
+      tr.appendChild(tdDiff);
+      summary.appendChild(tr);
+
+      // Detail panel
+      var panel = el("section", "panel");
+      var head = el("div", "stage-head");
+      head.appendChild(el("h2", null, stage.name));
+      head.appendChild(el("span", "base num", "強化コスト " + fmt(stage.cost) + "m / 回"));
+      panel.appendChild(head);
+
+      var wrap = el("div", "tablewrap");
+      var table = document.createElement("table");
+      var thead = document.createElement("thead");
+      var htr = document.createElement("tr");
+      ["選択肢", "成功率", "期待試行回数", "1回の費用", "期待総コスト", "使わない場合との差"].forEach(function (h) {
+        htr.appendChild(el("th", null, h));
+      });
+      thead.appendChild(htr);
+      table.appendChild(thead);
+      var tbody = document.createElement("tbody");
+      res.rows.forEach(function (r) {
+        var rtr = document.createElement("tr");
+        if (r === res.best) rtr.className = "best";
+        else if (!r.entered) rtr.className = "skip";
+        var first = el("td", null, r.label);
+        if (r === res.best) first.appendChild(el("span", "tag", "最安"));
+        rtr.appendChild(first);
+        rtr.appendChild(el("td", "num", (r.rate * 100).toFixed(0) + "%"));
+        rtr.appendChild(el("td", "num", r.attempts.toFixed(2) + "回"));
+        rtr.appendChild(el("td", "num", r.entered ? fmt(r.perTry) + "m" : "—"));
+        rtr.appendChild(el("td", "num", r.entered ? fmt(r.total) + "m" : "未入力"));
+        var d = r.entered && !r.isNone ? res.none.total - r.total : null;
+        var dText = "—";
+        var dCls = "num";
+        if (d !== null) {
+          if (d > 0.0001) { dText = "−" + fmt(d) + "m"; dCls += " save"; }
+          else if (d < -0.0001) { dText = "+" + fmt(-d) + "m"; }
+          else { dText = "差なし"; }
+        }
+        rtr.appendChild(el("td", dCls, dText));
+        tbody.appendChild(rtr);
+      });
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+      panel.appendChild(wrap);
+      stagesBox.appendChild(panel);
+    });
+
+    // Grand total row in the summary
+    var trT = document.createElement("tr");
+    trT.className = "total";
+    trT.appendChild(el("td", null, "5段階の合計"));
+    trT.appendChild(el("td", null, ""));
+    trT.appendChild(el("td", "num", fmt(sumBest) + "m"));
+    var sd = sumNone - sumBest;
+    trT.appendChild(el("td", "num" + (sd > 0.0001 ? " save" : ""), sd > 0.0001 ? "−" + fmt(sd) + "m" : "差なし"));
+    summary.appendChild(trT);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
